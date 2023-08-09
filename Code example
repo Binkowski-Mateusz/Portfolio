@@ -1,0 +1,427 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.UI;
+using TMPro;
+using DG.Tweening;
+
+public class Obstacle : MonoBehaviour
+{
+
+    [Header("Box original")]
+    [SerializeField] private int power = 0;
+    [SerializeField] private int lifePoints;
+    [SerializeField] private TextMeshPro lifeText;
+    [SerializeField] private List<ParticleSystem> particleAfterDeath;
+    private bool boxCanEat;
+    private bool alreadyDead;
+    private bool explosionHit = false;
+
+
+    [Header("Box abilities")]
+    public bool rightInfo;
+    public bool leftinfo;
+    public float direction;
+
+    private int countdown = 0;
+    private Tween moveSideways;
+    private bool usedPower;
+    private bool[] isPositionClear;
+
+
+    [SerializeField] private SpriteRenderer spriteRenderer;
+    [SerializeField] private EdgeCollider2D boxCollider;
+    [SerializeField] private int countNeedToUsePower = 1;
+    [SerializeField] private GameObject explosionObjectRange;
+
+
+    /// Power List with ID
+    /// 0 - Normal
+    /// 1 - Devourer
+    /// 2 - One Barrier
+    /// 3 - Disapear
+    /// 4 - Explosion
+
+
+    #region NormalBox
+    private void Start()
+    {
+        ObstaclePowerOnStart();
+        lifePoints = lifePoints + GameManager.Instance.globalLife;
+        lifeText.text = lifePoints.ToString();
+        boxCanEat = true;
+    }
+
+    private void OnTriggerEnter2D(Collider2D other)
+    {
+        TriggeredBox(other);
+    }
+
+    public void TriggeredBox(Collider2D other)
+    {
+        if (other.tag == "Line")
+        {
+            KillTween();
+            ObjectsManager.Instance.ObstaclesLineWhenCatchDeadLine(this.transform.parent.gameObject);
+            ObjectsManager.Instance.boxGotDeadLine = true;
+            ObjectsManager.Instance.DoEffectAfterCatchDeadLine(this.transform.localPosition.x);
+
+        }else
+
+        if (other.tag == "Obstacle" && this.power == 1)
+        {
+            GetLifePoints(other.GetComponentInParent<Obstacle>().GiveLifePointsAndDie(other));
+            lifeText.text = lifePoints.ToString();
+
+        }else if (other.tag == "ExpolsionRange")
+        {
+            explosionHit = true;
+            CheckIfAlreadyDied();
+        }
+    }
+
+    private void CheckIfAlreadyDied()
+    {
+        if (!alreadyDead)
+        {
+            alreadyDead = true;
+            StartCoroutine(DestroyObstacle());
+        }
+    }
+
+    private void EnabledPartifleEffectAfterDeath()
+    {
+        foreach(ParticleSystem particle in particleAfterDeath)
+        {
+            particle.transform.parent = null;
+            particle.Play();
+        }
+    }
+
+    private IEnumerator DestroyObstacle()
+    {
+        ObstaclePowerOnDestroy();
+        EnabledPartifleEffectAfterDeath();
+        yield return new WaitForSeconds(0.1f);
+        ScoreController.Instance.UpdateTextInfo();
+        DestroyBoxAndGetPoints();
+    }
+
+    private void DestroyBoxAndGetPoints()
+    {
+        KillTween();
+        RemoveBoxWithPowerFromPowerBoxList();
+        Destroy(this.gameObject);
+        GameManager.Instance.ChangeMovementObstacles();
+    }
+
+    private void RemoveBoxWithPowerFromPowerBoxList()
+    {
+        if(CheckBoxHaveAnyPower())
+        {
+            GameManager.Instance.obstacleWithPowerInGameList.Remove(this);
+        }
+    }
+
+    public void CheckLife(Collider2D collider)
+    {
+        if(power != 6)
+        {
+            if (lifePoints >= 2)
+            {
+                lifePoints = lifePoints - GameManager.Instance.ballDMG;
+                lifeText.text = lifePoints.ToString();
+
+                if (lifePoints <= 0)
+                {
+                    CheckIfAlreadyDied();
+                }
+            }
+            else
+            {
+                CheckIfAlreadyDied();
+            }
+        }else
+        {
+            if(explosionHit || collider.gameObject.layer == 10)
+            {
+                CheckIfAlreadyDied();
+            }
+        }
+
+    }
+
+    private void GetLifePoints(int lifes)
+    {
+        lifePoints = lifePoints + lifes;
+
+    }
+    public int GiveLifePointsAndDie(Collider2D box)
+    {
+        if (boxCanEat)
+        {
+            CheckIfIsDevourerBox(box);
+            int i = lifePoints;
+            lifePoints = 0;
+            CheckIfAlreadyDied();
+            return i;
+        }
+        else
+        {
+            return 0;
+        }
+    }
+    public void CheckIfIsDevourerBox(Collider2D box)
+    {
+        if(box.GetComponentInParent<Obstacle>().GetPowerFromObstacle() != 1)
+        {
+            this.boxCanEat = false;
+        }
+    }
+
+    private bool CheckIfBoxIsOnboard()
+    {
+        if(this.transform.parent.transform.localPosition.y <= 11.5)
+        {
+            return true;
+
+        }else if(this.transform.parent.transform.localPosition.y > 11.5)
+        {
+            return false;
+        }
+        return false;
+    }
+
+    private void KillTween()
+    {
+        moveSideways.Kill();
+    }
+
+    private void ObstaclePowerOnStart()
+    {
+        switch(power)
+        {
+            case 1:
+                EatersFunctions();
+                break;
+        }
+    }
+
+    private void ObstaclePowerOnDestroy()
+    {
+        switch (power)
+        {
+            case 4:
+                ExplosionPower();
+                break;
+        }
+    }
+
+    private void ObstacleWithPowerActiveInGame()
+    {
+        switch (power)
+        {
+            case 1:
+                MoveBox();
+                break;
+            case 3:
+                CheckToUseHidePower();
+                break;
+        }
+    }
+
+    public bool UsePowerInGame()
+    {
+        if(this != null)
+        {
+            if (CheckIfBoxIsOnboard())
+            {
+                TurnOffHidePower();
+                countdown++;
+                if (countdown == countNeedToUsePower)
+                {
+                    ObstacleWithPowerActiveInGame();
+                    countdown = 0;
+                }
+            }
+            return true;
+        }
+        else
+        {
+            GameManager.Instance.obstacleWithPowerInGameList.Remove(this);
+            return false;
+        }
+
+    }
+    public bool CheckBoxHaveAnyPower()
+    {
+        if (power == 1 || power == 3)
+            return true;
+        return false;
+    }
+
+    public int GetPowerFromObstacle()
+    {
+        return power;
+    }
+
+    #endregion
+    /// //////////////////////////////////////////////////////////////////////////////////
+    #region DisapearBox
+
+    private void TurnOffHidePower()
+    {
+        if(usedPower)
+        {
+            CheckToUseHidePower();
+        }
+    }
+
+    private void HidePower(bool hide)
+    {
+        if (hide)
+        {
+            spriteRenderer.color = new Color32(255, 255, 255, 30);
+
+        }
+        else
+        {
+            spriteRenderer.color = new Color32(255, 255, 255, 255);
+        }
+
+        DisappearBox(hide);
+    }
+
+    private void CheckToUseHidePower()
+    {
+        usedPower = !usedPower;
+        HidePower(usedPower);
+    }
+
+    private void DisappearBox(bool hide)
+    {
+        boxCollider.enabled = !hide;
+    }
+    #endregion
+    /// //////////////////////////////////////////////////////////////////////////////////
+    #region DevourerBox
+    private void EatersFunctions()
+    {
+        SetDirectionMovement();
+    }
+
+    public void MoveRight(float move)
+    {
+         if(move > 0 && this.transform.localPosition.x < 4)
+         {
+            isPositionClear[0] = true;
+         }
+         rightInfo = true;
+    }
+
+    public void MoveLeft(float move)
+    {
+        if(move < 0 && this.transform.localPosition.x > -4)
+        {
+            isPositionClear[1] = true;
+        }
+        leftinfo = true;
+    }
+
+    private void MoveBox()
+    {
+        if (leftinfo && rightInfo)
+        {
+            leftinfo = false;
+            rightInfo = false;
+            MovementDirectionSwitch();
+        }
+    }
+
+    private void MovementDirectionSwitch()
+    {
+        switch(RandomDirection())
+        {
+            case 0:
+                MoveBoxToNewPosition((float)2.3);
+                break;
+            case 1:
+                MoveBoxToNewPosition(-(float)2.3);
+                break;
+            case 2:
+                MoveBoxToNewPosition(0);
+                break;
+        }
+        ClearDirectionmovements();
+    }
+
+    private void SetBoxToBeEatenOrCanEat(float valueDirection)
+    {
+        if(valueDirection <= 0)
+        {
+            boxCanEat = true;
+        }else
+        {
+            boxCanEat = false;
+        }
+    }
+
+    private void MoveBoxToNewPosition(float direction)
+    {
+        if(!alreadyDead)
+        {
+            moveSideways = this.transform.DOLocalMove(new Vector2(this.transform.localPosition.x + direction, this.transform.localPosition.y), 1);
+            SetBoxToBeEatenOrCanEat(direction);
+        }
+    }
+
+    private void ClearDirectionmovements()
+    {
+        isPositionClear[0] = false;
+        isPositionClear[1] = false;
+    }
+
+    private void SetDirectionMovement()
+    {
+        isPositionClear = new bool[2];
+        ClearDirectionmovements();
+    }
+
+    public int RandomDirection()
+    {
+        if(isPositionClear[0] && isPositionClear[1])
+        {
+            int direction;
+            direction = Random.Range(0, 2);
+            if(direction == 0)
+            {
+                return 0;
+            }else
+            {
+                return 1;
+            }
+        }
+        else if (isPositionClear[0])
+        {
+            return 0;
+        }else if(isPositionClear[1])
+        {
+            return 1;
+        }else
+        {
+            return 2;
+        }
+    }
+    #endregion
+    /// //////////////////////////////////////////////////////////////////////////////////
+    #region ExplosionBox
+    private void ExplosionPower()
+    {
+        if(alreadyDead)
+        {
+            explosionObjectRange.SetActive(true);
+            explosionObjectRange.GetComponent<RectTransform>().DOScale(new Vector2(17, 11), 0.09f);
+        }
+    }
+    #endregion
+}
